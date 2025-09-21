@@ -77,7 +77,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="history"
         options={{
-          tabBarIcon: ({ color, focused }) => <TabBarIcon name="receipt-long" color={color} focused={focused} isMaterial />,
+          tabBarIcon: ({ color, focused }) => <TabBarIcon name="receipt" color={color} focused={focused} isMaterial />,
         }}
       />
       <Tabs.Screen

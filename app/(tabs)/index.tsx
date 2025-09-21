@@ -24,9 +24,10 @@ import BalanceCard from '../../components/BalanceCard';
 import Empty from '../../components/Empty';
 import Segmented from '../../components/Segmented';
 import TokenRow from '../../components/TokenRow';
-import { fetchTopTokens, useTokenStore } from '../../services/prices';
+import { fetchTopTokens } from '../../services/prices';
 import { useAppStore } from '../../state/appStore';
 import { usePnl24h, usePortfolioStore, usePortfolioValue } from '../../state/portfolioStore';
+import { Token } from '../../types/market';
 
 const FILTERS = ['Hot', 'Top', 'New', 'Gainers', 'Losers'];
 
@@ -37,7 +38,8 @@ export default function DashboardScreen() {
   const portfolioValue = usePortfolioValue();
   const pnl24h = usePnl24h();
 
-  const { tokens, loading, setTokens, setLoading } = useTokenStore();
+  const [tokens, setTokens] = useState<Token[]>([]);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState(FILTERS[0]);
 

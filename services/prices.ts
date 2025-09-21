@@ -4,27 +4,11 @@
  * normalizes the API response into the app's internal data types, and
  * includes a fallback to mock data to ensure functionality even if the API is down.
  */
-import { create } from 'zustand';
-
 import { usePortfolioStore } from '../state/portfolioStore';
 import { Currency, Quote, Token } from '../types/market';
 import { MOCK_HISTORY, MOCK_TOKENS } from './mockData';
 
 const API_BASE = 'https://api.coingecko.com/api/v3';
-
-type TokenState = {
-  tokens: Token[];
-  loading: boolean;
-  setTokens: (tokens: Token[]) => void;
-  setLoading: (loading: boolean) => void;
-};
-
-export const useTokenStore = create<TokenState>((set) => ({
-  tokens: [],
-  loading: false,
-  setTokens: (tokens) => set({ tokens }),
-  setLoading: (loading) => set({ loading }),
-}));
 
 const fetchWithFallback = async <T>(url: string, fallbackData: T): Promise<T> => {
   try {

@@ -6,9 +6,9 @@
  * holdings and activities to AsyncStorage.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
-import { shallow } from 'zustand/shallow';
 import { Activity, Holding, Quote } from '../types/market';
 
 interface PortfolioState {
@@ -115,28 +115,29 @@ const selectPortfolioValue = (state: PortfolioState) => {
     }, 0);
 };
 
-const selectPnl24h = (state: PortfolioState) => {
-     const pnlValue = state.holdings.reduce((total, holding) => {
-      const quote = state.quotes[holding.id];
-      if (!quote) return total;
-      const priceNow = quote.current_price;
-      const price24hAgo = priceNow / (1 + (quote.price_change_percentage_24h ?? 0) / 100);
-      const valueChange = (priceNow - price24hAgo) * holding.amount;
-      return total + valueChange;
-    }, 0);
-    
-    const totalValue = selectPortfolioValue(state);
-    const totalValue24hAgo = totalValue - pnlValue;
-    const pnlPercent = totalValue24hAgo === 0 ? 0 : (pnlValue / totalValue24hAgo);
-    
-    // NOTE: Returning a new object here causes re-renders.
-    // We use `shallow` in the component to prevent this.
-    return { value: pnlValue, percent: pnlPercent };
+const selectPnl24hValue = (state: PortfolioState) =>
+  state.holdings.reduce((total, holding) => {
+    const quote = state.quotes[holding.id];
+    if (!quote) return total;
+    const priceNow = quote.current_price;
+    const price24hAgo = priceNow / (1 + (quote.price_change_percentage_24h ?? 0) / 100);
+    const valueChange = (priceNow - price24hAgo) * holding.amount;
+    return total + valueChange;
+  }, 0);
+
+const selectPnl24hPercent = (state: PortfolioState) => {
+  const pnlValue = selectPnl24hValue(state);
+  const totalValue = selectPortfolioValue(state);
+  const totalValue24hAgo = totalValue - pnlValue;
+  return totalValue24hAgo === 0 ? 0 : pnlValue / totalValue24hAgo;
 };
 
 // --- Selector Hooks ---
 export const usePortfolioValue = () => usePortfolioStore(selectPortfolioValue);
 
-// Use the shallow equality function to prevent re-renders when the object's properties are the same
-export const usePnl24h = () => usePortfolioStore(selectPnl24h, shallow);
+export const usePnl24h = () => {
+  const value = usePortfolioStore(selectPnl24hValue);
+  const percent = usePortfolioStore(selectPnl24hPercent);
+  return useMemo(() => ({ value, percent }), [value, percent]);
+};
 
