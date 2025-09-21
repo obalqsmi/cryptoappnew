@@ -37,7 +37,7 @@ export default function DashboardScreen() {
   const portfolioValue = usePortfolioValue();
   const pnl24h = usePnl24h();
 
-  const { tokens, loading, setTokens } = useTokenStore();
+  const { tokens, loading, setTokens, setLoading } = useTokenStore();
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState(FILTERS[0]);
 
@@ -45,31 +45,25 @@ export default function DashboardScreen() {
   const isDarkMode = colorScheme === 'dark';
   const styles = getStyles(isDarkMode);
 
-  const loadData = useCallback(async (isRefresh = false) => {
-    if (!isRefresh) {
-        useTokenStore.setState({ loading: true });
-    }
-    try {
-      const fetchedTokens = await fetchTopTokens(currency);
-      setTokens(fetchedTokens);
-      const quotes = fetchedTokens.reduce((acc, token) => {
-          acc[token.id] = {
-              current_price: token.current_price,
-              price_change_percentage_24h: token.price_change_percentage_24h
-          };
-          return acc;
-      }, {} as Record<string, any>);
-      usePortfolioStore.getState().setQuotes(quotes);
-
-    } catch (error) {
-      console.error('Failed to fetch token data:', error);
-    } finally {
-        useTokenStore.setState({ loading: false });
+  const loadData = useCallback(
+    async (isRefresh = false) => {
+      if (!isRefresh) {
+        setLoading(true);
+      }
+      try {
+        const fetchedTokens = await fetchTopTokens(currency);
+        setTokens(fetchedTokens);
+      } catch (error) {
+        console.error('Failed to fetch token data:', error);
+      } finally {
+        setLoading(false);
         if (isRefresh) {
-            setRefreshing(false);
+          setRefreshing(false);
         }
-    }
-  }, [currency, setTokens]);
+      }
+    },
+    [currency, setLoading, setTokens]
+  );
 
   useEffect(() => {
     loadData();
@@ -139,18 +133,32 @@ export default function DashboardScreen() {
             data={portfolioTokens}
             ListHeaderComponent={renderHeader}
             ListFooterComponent={
-                <>
-                    {otherTokens.length > 0 && (
-                        <Text style={[styles.sectionHeader, {marginTop: 16}]}>Watchlist</Text>
-                    )}
-                    {otherTokens.map(token => <TokenRow key={token.id} token={token} currency={currency} />)}
-                </>
+              <>
+                {otherTokens.length > 0 && (
+                  <Text style={[styles.sectionHeader, { marginTop: 16 }]}>Watchlist</Text>
+                )}
+                {otherTokens.map((token) => (
+                  <TokenRow key={token.id} token={token} currency={currency} />
+                ))}
+              </>
             }
-            ListEmptyComponent={<Empty message="No assets yet." actionTitle="Explore Market" onAction={() => router.push('/(tabs)/market')}/>}
+            ListEmptyComponent={
+              <Empty
+                message="No assets yet."
+                actionTitle="Explore Market"
+                onAction={() => router.push('/(tabs)/market')}
+              />
+            }
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => <TokenRow token={item} currency={currency} />}
             contentContainerStyle={styles.listContent}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isDarkMode ? "#FFF" : "#000"} />}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={isDarkMode ? '#FFF' : '#000'}
+              />
+            }
           />
        )}
        

@@ -6,13 +6,14 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Appearance, StyleSheet, View } from 'react-native';
 import { VictoryAxis, VictoryChart, VictoryLine, VictoryTooltip, VictoryVoronoiContainer } from 'victory-native';
+
 import { formatCurrency } from '../services/formatting';
 import { fetchTokenHistory } from '../services/prices';
 import { useAppStore } from '../state/appStore';
 import Segmented from './Segmented';
 
-type TimeRange = '24H' | '7D' | '1M' | '1Y';
-const RANGES: TimeRange[] = ['24H', '7D', '1M', '1Y'];
+const RANGES = ['24H', '7D', '1M', '1Y'] as const;
+type TimeRange = (typeof RANGES)[number];
 
 const daysForRange: Record<TimeRange, number> = {
   '24H': 1,
@@ -53,8 +54,12 @@ export default function PriceChart({ tokenId }: { tokenId: string }) {
 
   return (
     <View style={styles.container}>
-        <View style={{paddingHorizontal: 16, marginBottom: 8}}>
-            <Segmented options={RANGES} selected={range} onSelect={setRange} />
+        <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+            <Segmented
+              options={RANGES}
+              selected={range}
+              onSelect={(option) => setRange(option as TimeRange)}
+            />
         </View>
         <VictoryChart
             height={250}

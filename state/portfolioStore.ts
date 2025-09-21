@@ -45,12 +45,19 @@ const usePortfolioStoreBase = create<PortfolioState>()(
         quotes: {},
         setQuotes: (quotes) => set({ quotes }),
         addActivity: (activity) => {
-          set((state) => ({
-            activities: [
-              { ...activity, id: `act_${Date.now()}`, date: new Date().toISOString() },
-              ...state.activities,
-            ],
-          }));
+          set((state) => {
+            const newActivity = {
+              ...activity,
+              id: `act_${Date.now()}`,
+              date: new Date().toISOString(),
+            } as Activity;
+
+            const nextState: Partial<PortfolioState> = {
+              activities: [newActivity, ...state.activities],
+            };
+
+            return nextState;
+          });
         },
         recordSwap: (from, to) => {
           const { quotes } = get();
@@ -58,7 +65,7 @@ const usePortfolioStoreBase = create<PortfolioState>()(
 
           set((state) => {
             const newHoldings = [...state.holdings];
-            
+
             const fromIndex = newHoldings.findIndex(h => h.id === from.id);
             if (fromIndex > -1) {
               newHoldings[fromIndex].amount -= from.amount;
@@ -66,26 +73,27 @@ const usePortfolioStoreBase = create<PortfolioState>()(
                 newHoldings.splice(fromIndex, 1);
               }
             }
-            
+
             const toIndex = newHoldings.findIndex(h => h.id === to.id);
             if(toIndex > -1) {
                 newHoldings[toIndex].amount += to.amount;
             } else {
-                newHoldings.push(to);
+                newHoldings.push({ ...to });
             }
-            
-             const newActivities: Activity[] = [
-                {
-                    id: `swap_${Date.now()}`,
-                    date: new Date().toISOString(),
-                    type: 'swap',
-                    from: { ...from, valueUsd: fromValue },
-                    to: { ...to, valueUsd: fromValue },
-                },
-                ...state.activities,
-            ];
 
-            return { holdings: newHoldings, activities: newActivities };
+            const swapActivity: Activity = {
+              id: `swap_${Date.now()}`,
+              date: new Date().toISOString(),
+              type: 'swap',
+              from: { ...from, valueUsd: fromValue },
+              to: { ...to, valueUsd: fromValue },
+            };
+
+            const nextState: Partial<PortfolioState> = {
+              holdings: newHoldings,
+              activities: [swapActivity, ...state.activities],
+            };
+            return nextState;
           });
         },
       }),
