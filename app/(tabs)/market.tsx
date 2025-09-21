@@ -26,8 +26,9 @@ import { fetchTopTokens } from '../../services/prices';
 import { useAppStore } from '../../state/appStore';
 import { Token } from '../../types/market';
 
-const FILTERS = ['Hot', 'Top', 'New', 'Gainers', 'Losers'];
-const SORT_OPTIONS = ['Price', '% 24h', 'Name'];
+const FILTERS = ['Hot', 'Top', 'New', 'Gainers', 'Losers'] as const;
+type MarketFilter = (typeof FILTERS)[number];
+const SORT_OPTIONS = ['Price', '% 24h', 'Name'] as const;
 
 export default function MarketScreen() {
   const router = useRouter();
@@ -36,8 +37,8 @@ export default function MarketScreen() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState(FILTERS[0]);
-  const [sortOption, setSortOption] = useState(SORT_OPTIONS[0]);
+  const [activeFilter, setActiveFilter] = useState<MarketFilter>(FILTERS[0]);
+  const [sortOption, setSortOption] = useState<(typeof SORT_OPTIONS)[number]>(SORT_OPTIONS[0]);
   const [selectedToken, setSelectedToken] = useState<Token | null>(null);
 
   const loadData = useCallback(async () => {
@@ -134,8 +135,12 @@ export default function MarketScreen() {
         />
       </View>
       
-      <View style={{paddingHorizontal: 16, marginBottom: 16}}>
-        <Segmented options={FILTERS} selected={activeFilter} onSelect={setActiveFilter} />
+      <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+        <Segmented
+          options={FILTERS}
+          selected={activeFilter}
+          onSelect={(option) => setActiveFilter(option as MarketFilter)}
+        />
       </View>
 
       {renderTokenDetail()}

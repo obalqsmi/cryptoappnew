@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import Segmented from '../../components/Segmented';
 import Sheet from '../../components/Sheet';
 import { formatCurrency } from '../../services/formatting';
 import { fetchTopTokens } from '../../services/prices';
@@ -27,7 +28,8 @@ import { useAppStore } from '../../state/appStore';
 import { usePortfolioStore } from '../../state/portfolioStore';
 import { Holding, Token } from '../../types/market';
 
-const NETWORKS = ['Ethereum', 'Solana', 'Cronos'];
+const NETWORKS = ['Ethereum', 'Solana', 'Cronos'] as const;
+type NetworkOption = (typeof NETWORKS)[number];
 
 export default function TradeScreen() {
   const router = useRouter();
@@ -42,7 +44,7 @@ export default function TradeScreen() {
   const [toToken, setToToken] = useState<Token | null>(null);
   const [fromAmount, setFromAmount] = useState('');
   
-  const [network, setNetwork] = useState(NETWORKS[0]);
+  const [network, setNetwork] = useState<NetworkOption>(NETWORKS[0]);
   const [isFromSheetVisible, setFromSheetVisible] = useState(false);
   const [isToSheetVisible, setToSheetVisible] = useState(false);
   const [isConfirmSheetVisible, setConfirmSheetVisible] = useState(false);
@@ -163,7 +165,11 @@ export default function TradeScreen() {
 
         <View style={styles.card}>
             <View style={{alignItems: 'center', marginBottom: 20}}>
-                <Segmented options={NETWORKS} selected={network} onSelect={setNetwork} />
+                <Segmented
+                  options={NETWORKS}
+                  selected={network}
+                  onSelect={(option: string) => setNetwork(option as NetworkOption)}
+                />
             </View>
 
             {renderTokenSelector(fromToken, () => setFromSheetVisible(true), 'You Pay', fromBalance)}

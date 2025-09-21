@@ -19,7 +19,22 @@ import { Activity } from '../../types/market';
 
 dayjs.extend(localizedFormat);
 
-const FILTERS = ['All', 'Transfers', 'Swaps', 'Earn'];
+const FILTERS = ['All', 'Transfers', 'Swaps', 'Earn'] as const;
+type FilterOption = (typeof FILTERS)[number];
+
+const FILTER_ACTIVITY_MAP: Record<FilterOption, Activity['type'][]> = {
+  All: ['swap', 'send', 'receive', 'stake'],
+  Transfers: ['send', 'receive'],
+  Swaps: ['swap'],
+  Earn: ['stake'],
+};
+
+const formatAddress = (address?: string) => {
+  if (!address) {
+    return 'Unknown';
+  }
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+};
 
 const ActivityIcon = ({ type }: { type: Activity['type'] }) => {
   switch (type) {
@@ -52,33 +67,39 @@ const ActivityItem = ({ item, isDarkMode }: { item: Activity; isDarkMode: boolea
         </Text>
       );
       break;
-    case 'send':
-      title = `Send ${item.asset.symbol}`;
-      details = `To: ${item.toAddress.slice(0, 6)}...${item.toAddress.slice(-4)}`;
+    case 'send': {
+      const symbol = item.from.symbol.toUpperCase();
+      title = `Send ${symbol}`;
+      details = `To: ${formatAddress(item.to.address)}`;
       amountDisplay = (
         <Text style={styles.amountNegative}>
-          - {formatCompact(item.asset.amount)} {item.asset.symbol}
+          - {formatCompact(item.from.amount)} {symbol}
         </Text>
       );
       break;
-    case 'receive':
-      title = `Receive ${item.asset.symbol}`;
-      details = `From: ${item.fromAddress.slice(0, 6)}...${item.fromAddress.slice(-4)}`;
+    }
+    case 'receive': {
+      const symbol = item.to.symbol.toUpperCase();
+      title = `Receive ${symbol}`;
+      details = `From: ${formatAddress(item.from.address)}`;
       amountDisplay = (
         <Text style={styles.amountPositive}>
-          + {formatCompact(item.asset.amount)} {item.asset.symbol}
+          + {formatCompact(item.to.amount)} {symbol}
         </Text>
       );
       break;
-    case 'stake':
-       title = `Stake ${item.asset.symbol}`;
-       details = `Validator: ${item.validator.slice(0, 6)}...${item.validator.slice(-4)}`;
-       amountDisplay = (
+    }
+    case 'stake': {
+      const symbol = item.from.symbol.toUpperCase();
+      title = `Stake ${symbol}`;
+      details = `Validator: ${formatAddress(item.to.validator)}`;
+      amountDisplay = (
         <Text style={styles.amountMuted}>
-          {formatCompact(item.asset.amount)} {item.asset.symbol}
+          {formatCompact(item.from.amount)} {symbol}
         </Text>
       );
       break;
+    }
   }
 
   return (
@@ -100,19 +121,18 @@ export default function HistoryScreen() {
   const router = useRouter();
   const { activities } = usePortfolioStore();
   const { theme } = useAppStore();
-  const [activeFilter, setActiveFilter] = useState(FILTERS[0]);
+  const [activeFilter, setActiveFilter] = useState<FilterOption>(FILTERS[0]);
   
   const colorScheme = theme === 'system' ? Appearance.getColorScheme() : theme;
   const isDarkMode = colorScheme === 'dark';
   const styles = getStyles(isDarkMode);
 
   const filteredActivities = useMemo(() => {
-    if (activeFilter === 'All') return activities;
-    const filterType = activeFilter === 'Transfers' 
-        ? ['send', 'receive']
-        : [activeFilter.toLowerCase().slice(0, -1)]; // 'swaps' -> 'swap'
-    
-    return activities.filter((a) => filterType.includes(a.type));
+    if (activeFilter === 'All') {
+      return activities;
+    }
+    const filterTypes = FILTER_ACTIVITY_MAP[activeFilter];
+    return activities.filter((a) => filterTypes.includes(a.type));
   }, [activities, activeFilter]);
 
   const sections = useMemo(() => {
@@ -137,10 +157,10 @@ export default function HistoryScreen() {
         <Text style={styles.headerTitle}>History</Text>
       </View>
       <View style={{ paddingHorizontal: 16, marginBottom: 16, marginTop: 8 }}>
-        <Segmented 
-            options={FILTERS} 
-            selected={activeFilter} 
-            onSelect={setActiveFilter}
+        <Segmented
+          options={FILTERS}
+          selected={activeFilter}
+          onSelect={(option) => setActiveFilter(option as FilterOption)}
         />
       </View>
 
@@ -151,7 +171,13 @@ export default function HistoryScreen() {
         renderSectionHeader={({ section: { title } }) => (
           <Text style={styles.sectionHeader}>{title}</Text>
         )}
-        ListEmptyComponent={<Empty message="No activities yet." actionTitle="Make a Swap" onAction={() => router.push('/(tabs)/trade')} />}
+        ListEmptyComponent={
+          <Empty
+            message="No activities yet."
+            actionTitle="Make a Swap"
+            onAction={() => router.push('/(tabs)/trade')}
+          />
+        }
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
       />
     </SafeAreaView>
@@ -206,7 +232,7 @@ const getStyles = (isDarkMode: boolean) => StyleSheet.create({
     color: '#2F80ED',
     fontWeight: '600',
   },
-    amountPositive: {
+  amountPositive: {
     color: '#1DB954',
     fontWeight: '600',
   },
@@ -219,8 +245,8 @@ const getStyles = (isDarkMode: boolean) => StyleSheet.create({
     fontWeight: '600',
   },
   amountMuted: {
-      color: isDarkMode ? '#a1a1aa' : '#71717a',
-      fontWeight: '600'
-  }
+    color: isDarkMode ? '#a1a1aa' : '#71717a',
+    fontWeight: '600',
+  },
 });
 

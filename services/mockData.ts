@@ -59,7 +59,9 @@ export const MOCK_TOKENS: Token[] = [
   },
 ];
 
-export const MOCK_HISTORY = {
-  prices: MOCK_TOKENS[0].sparkline_in_7d.price.map((p, i) => [Date.now() - (168 - i) * 3600 * 1000, p]),
+export const MOCK_HISTORY: { prices: [number, number][] } = {
+  prices: MOCK_TOKENS[0].sparkline_in_7d.price.map(
+    (p, i) => [Date.now() - (168 - i) * 3600 * 1000, p] as [number, number]
+  ),
 };
 

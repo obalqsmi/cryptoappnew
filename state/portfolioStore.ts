@@ -6,9 +6,9 @@
  * holdings and activities to AsyncStorage.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
-import { shallow } from 'zustand/shallow';
 import { Activity, Holding, Quote } from '../types/market';
 
 interface PortfolioState {
@@ -45,12 +45,19 @@ const usePortfolioStoreBase = create<PortfolioState>()(
         quotes: {},
         setQuotes: (quotes) => set({ quotes }),
         addActivity: (activity) => {
-          set((state) => ({
-            activities: [
-              { ...activity, id: `act_${Date.now()}`, date: new Date().toISOString() },
-              ...state.activities,
-            ],
-          }));
+          set((state) => {
+            const newActivity = {
+              ...activity,
+              id: `act_${Date.now()}`,
+              date: new Date().toISOString(),
+            } as Activity;
+
+            const nextState: Partial<PortfolioState> = {
+              activities: [newActivity, ...state.activities],
+            };
+
+            return nextState;
+          });
         },
         recordSwap: (from, to) => {
           const { quotes } = get();
@@ -58,7 +65,7 @@ const usePortfolioStoreBase = create<PortfolioState>()(
 
           set((state) => {
             const newHoldings = [...state.holdings];
-            
+
             const fromIndex = newHoldings.findIndex(h => h.id === from.id);
             if (fromIndex > -1) {
               newHoldings[fromIndex].amount -= from.amount;
@@ -66,26 +73,27 @@ const usePortfolioStoreBase = create<PortfolioState>()(
                 newHoldings.splice(fromIndex, 1);
               }
             }
-            
+
             const toIndex = newHoldings.findIndex(h => h.id === to.id);
             if(toIndex > -1) {
                 newHoldings[toIndex].amount += to.amount;
             } else {
-                newHoldings.push(to);
+                newHoldings.push({ ...to });
             }
-            
-             const newActivities: Activity[] = [
-                {
-                    id: `swap_${Date.now()}`,
-                    date: new Date().toISOString(),
-                    type: 'swap',
-                    from: { ...from, valueUsd: fromValue },
-                    to: { ...to, valueUsd: fromValue },
-                },
-                ...state.activities,
-            ];
 
-            return { holdings: newHoldings, activities: newActivities };
+            const swapActivity: Activity = {
+              id: `swap_${Date.now()}`,
+              date: new Date().toISOString(),
+              type: 'swap',
+              from: { ...from, valueUsd: fromValue },
+              to: { ...to, valueUsd: fromValue },
+            };
+
+            const nextState: Partial<PortfolioState> = {
+              holdings: newHoldings,
+              activities: [swapActivity, ...state.activities],
+            };
+            return nextState;
           });
         },
       }),
@@ -107,28 +115,29 @@ const selectPortfolioValue = (state: PortfolioState) => {
     }, 0);
 };
 
-const selectPnl24h = (state: PortfolioState) => {
-     const pnlValue = state.holdings.reduce((total, holding) => {
-      const quote = state.quotes[holding.id];
-      if (!quote) return total;
-      const priceNow = quote.current_price;
-      const price24hAgo = priceNow / (1 + (quote.price_change_percentage_24h ?? 0) / 100);
-      const valueChange = (priceNow - price24hAgo) * holding.amount;
-      return total + valueChange;
-    }, 0);
-    
-    const totalValue = selectPortfolioValue(state);
-    const totalValue24hAgo = totalValue - pnlValue;
-    const pnlPercent = totalValue24hAgo === 0 ? 0 : (pnlValue / totalValue24hAgo);
-    
-    // NOTE: Returning a new object here causes re-renders.
-    // We use `shallow` in the component to prevent this.
-    return { value: pnlValue, percent: pnlPercent };
+const selectPnl24hValue = (state: PortfolioState) =>
+  state.holdings.reduce((total, holding) => {
+    const quote = state.quotes[holding.id];
+    if (!quote) return total;
+    const priceNow = quote.current_price;
+    const price24hAgo = priceNow / (1 + (quote.price_change_percentage_24h ?? 0) / 100);
+    const valueChange = (priceNow - price24hAgo) * holding.amount;
+    return total + valueChange;
+  }, 0);
+
+const selectPnl24hPercent = (state: PortfolioState) => {
+  const pnlValue = selectPnl24hValue(state);
+  const totalValue = selectPortfolioValue(state);
+  const totalValue24hAgo = totalValue - pnlValue;
+  return totalValue24hAgo === 0 ? 0 : pnlValue / totalValue24hAgo;
 };
 
 // --- Selector Hooks ---
 export const usePortfolioValue = () => usePortfolioStore(selectPortfolioValue);
 
-// Use the shallow equality function to prevent re-renders when the object's properties are the same
-export const usePnl24h = () => usePortfolioStore(selectPnl24h, shallow);
+export const usePnl24h = () => {
+  const value = usePortfolioStore(selectPnl24hValue);
+  const percent = usePortfolioStore(selectPnl24hPercent);
+  return useMemo(() => ({ value, percent }), [value, percent]);
+};
 

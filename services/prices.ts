@@ -5,7 +5,7 @@
  * includes a fallback to mock data to ensure functionality even if the API is down.
  */
 import { usePortfolioStore } from '../state/portfolioStore';
-import { Currency, Token } from '../types/market';
+import { Currency, Quote, Token } from '../types/market';
 import { MOCK_HISTORY, MOCK_TOKENS } from './mockData';
 
 const API_BASE = 'https://api.coingecko.com/api/v3';
@@ -48,7 +48,7 @@ export const fetchTopTokens = async (vs_currency: Currency, page: number = 1): P
       price_change_percentage_24h: token.price_change_percentage_24h,
     };
     return acc;
-  }, {} as Record<string, any>);
+  }, {} as Record<string, Quote>);
   usePortfolioStore.getState().setQuotes(quotes);
 
   return tokens;
