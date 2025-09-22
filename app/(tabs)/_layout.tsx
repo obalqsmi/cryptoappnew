@@ -1,12 +1,14 @@
 /**
- * This file defines the layout for the main bottom tab navigator.
- * It configures the tabs, their icons, and appearance, serving as the
- * primary navigation hub for the user.
+ * Bottom tab navigator configuration.
+ * Pulls theme colors from global settings and exposes the portfolio, market, trading,
+ * history analytics, NFT gallery, and settings tabs.
  */
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
+
+import { useAppStore } from '../../state/store';
 
 const ICON_SIZE = 26;
 
@@ -31,13 +33,21 @@ const TabBarIcon = ({
 };
 
 export default function TabLayout() {
-  const theme = {
-    background: '#111927',
+  const theme = useAppStore((state) => state.theme);
+  const colorScheme = theme === 'light' ? 'light' : theme === 'oled' ? 'dark' : theme;
+
+  const colors = {
+    background: colorScheme === 'light' ? '#FFFFFF' : '#0B1220',
     active: '#FFFFFF',
-    inactive: '#6B768A',
-    primary: '#2F80ED',
-    border: 'rgba(255, 255, 255, 0.1)',
+    inactive: 'rgba(255,255,255,0.5)',
+    border: 'rgba(255, 255, 255, 0.08)',
   };
+
+  if (colorScheme === 'light') {
+    colors.active = '#0B1220';
+    colors.inactive = '#6B7280';
+    colors.border = 'rgba(15, 23, 42, 0.08)';
+  }
 
   return (
     <Tabs
@@ -45,13 +55,13 @@ export default function TabLayout() {
         headerShown: false,
         tabBarShowLabel: false,
         tabBarStyle: {
-          backgroundColor: theme.background,
-          borderTopColor: theme.border,
+          backgroundColor: colors.background,
+          borderTopColor: colors.border,
           borderTopWidth: StyleSheet.hairlineWidth,
           height: Platform.OS === 'ios' ? 90 : 70,
         },
-        tabBarActiveTintColor: theme.active,
-        tabBarInactiveTintColor: theme.inactive,
+        tabBarActiveTintColor: colors.active,
+        tabBarInactiveTintColor: colors.inactive,
       }}
     >
       <Tabs.Screen
@@ -77,7 +87,17 @@ export default function TabLayout() {
       <Tabs.Screen
         name="history"
         options={{
-          tabBarIcon: ({ color, focused }) => <TabBarIcon name="receipt" color={color} focused={focused} isMaterial />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabBarIcon name="receipt" color={color} focused={focused} isMaterial />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="nfts"
+        options={{
+          tabBarIcon: ({ color, focused }) => (
+            <TabBarIcon name="diamond-stone" color={color} focused={focused} isMaterial />
+          ),
         }}
       />
       <Tabs.Screen
@@ -103,6 +123,8 @@ const styles = StyleSheet.create({
     height: 4,
     width: 4,
     borderRadius: 2,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#2F80ED',
+    marginTop: 4,
   },
 });
+
