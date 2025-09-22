@@ -6,7 +6,8 @@
  * kept for reference or for direct storage access if needed.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Currency, Holding, Theme } from '../types/market';
+import { Currency, Holding } from '../types/market';
+import { ThemeOption } from '../types/app';
 
 const KEYS = {
   HOLDINGS: '@CryptoWallet/Holdings',
@@ -36,11 +37,11 @@ export const setCurrency = async (currency: Currency): Promise<void> => {
 };
 
 // Theme
-export const getTheme = async (): Promise<Theme> => {
+export const getTheme = async (): Promise<ThemeOption> => {
   const value = await AsyncStorage.getItem(KEYS.THEME);
-  return (value as Theme) || 'dark';
+  return (value as ThemeOption) || 'dark';
 };
 
-export const setTheme = async (theme: Theme): Promise<void> => {
+export const setTheme = async (theme: ThemeOption): Promise<void> => {
   await AsyncStorage.setItem(KEYS.THEME, theme);
 };

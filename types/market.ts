@@ -5,7 +5,6 @@
  */
 
 export type Currency = 'USD' | 'EUR' | 'AED';
-export type Theme = 'dark' | 'light' | 'system';
 
 export interface Token {
   id: string;
@@ -29,6 +28,7 @@ export interface Holding {
   id: string;
   symbol: string;
   amount: number;
+  averageCost?: number;
 }
 
 type ActivityBase = {
@@ -51,7 +51,7 @@ type SendActivity = ActivityBase & {
 type ReceiveActivity = ActivityBase & {
   type: 'receive';
   from: { address: string };
-  to: { id:string; symbol: string; amount: number; valueUsd: number };
+  to: { id: string; symbol: string; amount: number; valueUsd: number };
 };
 
 type StakeActivity = ActivityBase & {
@@ -61,3 +61,4 @@ type StakeActivity = ActivityBase & {
 };
 
 export type Activity = SwapActivity | SendActivity | ReceiveActivity | StakeActivity;
+

@@ -1,235 +1,420 @@
-/**
- * Market Screen: Allows users to discover and search for cryptocurrencies.
- * It features a search bar with debouncing, category filters, and a sort menu.
- * Tapping a token reveals an inline detail view with a price chart and action buttons.
- */
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import * as WebBrowser from 'expo-web-browser';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   LayoutAnimation,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Empty from '../../components/Empty';
+
 import PriceChart from '../../components/PriceChart';
 import Segmented from '../../components/Segmented';
+import Skeleton from '../../components/Skeleton';
 import TokenRow from '../../components/TokenRow';
+import { useTranslation } from '../../services/i18n';
 import { fetchTopTokens } from '../../services/prices';
-import { useAppStore } from '../../state/appStore';
+import { notifyAlert } from '../../services/notifications';
+import { formatCurrency } from '../../services/formatting';
+import { useAppStore } from '../../state/store';
 import { Token } from '../../types/market';
 
 const FILTERS = ['Hot', 'Top', 'New', 'Gainers', 'Losers'] as const;
 type MarketFilter = (typeof FILTERS)[number];
-const SORT_OPTIONS = ['Price', '% 24h', 'Name'] as const;
 
-export default function MarketScreen() {
-  const router = useRouter();
-  const { currency } = useAppStore();
-  const [tokens, setTokens] = useState<Token[]>([]);
-  const [loading, setLoading] = useState(true);
+const MarketScreen = () => {
+  const { t } = useTranslation();
+  const {
+    currency,
+    tokens,
+    tokensLoading,
+    priceAlerts,
+    portfolioAlerts,
+    news,
+    addPriceAlert,
+    removePriceAlert,
+    addPortfolioAlert,
+  } = useAppStore((state) => ({
+    currency: state.currency,
+    tokens: state.tokens,
+    tokensLoading: state.tokensLoading,
+    priceAlerts: state.priceAlerts,
+    portfolioAlerts: state.portfolioAlerts,
+    news: state.news,
+    addPriceAlert: state.addPriceAlert,
+    removePriceAlert: state.removePriceAlert,
+    addPortfolioAlert: state.addPortfolioAlert,
+  }));
+
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<MarketFilter>(FILTERS[0]);
-  const [sortOption, setSortOption] = useState<(typeof SORT_OPTIONS)[number]>(SORT_OPTIONS[0]);
+  const [activeFilter, setActiveFilter] = useState<MarketFilter>('Hot');
   const [selectedToken, setSelectedToken] = useState<Token | null>(null);
+  const [priceTarget, setPriceTarget] = useState('');
+  const [percentChange, setPercentChange] = useState('');
+  const [direction, setDirection] = useState<'above' | 'below'>('above');
+  const [repeating, setRepeating] = useState(false);
+  const [portfolioThreshold, setPortfolioThreshold] = useState('5');
+  const [portfolioDirection, setPortfolioDirection] = useState<'up' | 'down'>('down');
 
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const fetchedTokens = await fetchTopTokens(currency);
-      setTokens(fetchedTokens);
-    } catch (error) {
-      console.error('Failed to fetch market data:', error);
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (!tokens.length) {
+      fetchTopTokens(currency);
     }
-  }, [currency]);
+  }, [currency, tokens.length]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-  
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedQuery(searchQuery);
-    }, 300); // 300ms debounce
-    return () => clearTimeout(handler);
-  }, [searchQuery]);
-
-  const filteredAndSortedTokens = useMemo(() => {
-    let result = tokens.filter(
-      (t) =>
-        t.name.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
-        t.symbol.toLowerCase().includes(debouncedQuery.toLowerCase())
-    );
-    // Add filtering logic for 'Hot', 'Top', 'New' if API supports it
+  const filteredTokens = useMemo(() => {
+    const query = searchQuery.toLowerCase();
+    let list = tokens.filter((token) => token.name.toLowerCase().includes(query) || token.symbol.toLowerCase().includes(query));
     if (activeFilter === 'Gainers') {
-        result.sort((a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h);
+      list = [...list].sort((a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h);
     } else if (activeFilter === 'Losers') {
-        result.sort((a, b) => a.price_change_percentage_24h - b.price_change_percentage_24h);
+      list = [...list].sort((a, b) => a.price_change_percentage_24h - b.price_change_percentage_24h);
     }
+    return list;
+  }, [tokens, searchQuery, activeFilter]);
 
-    if(sortOption === 'Price') result.sort((a, b) => b.current_price - a.current_price);
-    if(sortOption === '% 24h') result.sort((a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h);
-    if(sortOption === 'Name') result.sort((a, b) => a.name.localeCompare(b.name));
-    
-    return result;
-  }, [tokens, debouncedQuery, activeFilter, sortOption]);
+  const handleAddPriceAlert = () => {
+    if (!selectedToken) return;
+    const targetValue = priceTarget ? Number(priceTarget) : undefined;
+    const percentValue = percentChange ? Number(percentChange) : undefined;
+    if (!targetValue && !percentValue) return;
+    const alert = addPriceAlert({
+      assetId: selectedToken.id,
+      assetSymbol: selectedToken.symbol.toUpperCase(),
+      condition: { targetPrice: targetValue, percentChange: percentValue, direction },
+      repeating,
+    });
+    notifyAlert('Alert Saved', `Tracking ${alert.assetSymbol} ${direction} targets`);
+    setPriceTarget('');
+    setPercentChange('');
+  };
+
+  const handlePortfolioAlert = () => {
+    const threshold = Number(portfolioThreshold);
+    if (!threshold) return;
+    addPortfolioAlert({ thresholdPercent: threshold, direction: portfolioDirection, repeating: true });
+  };
 
   const handleTokenPress = (token: Token) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setSelectedToken(selectedToken?.id === token.id ? null : token);
   };
-  
-  if (loading && tokens.length === 0) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <ActivityIndicator size="large" color="#FFFFFF" />
-      </SafeAreaView>
-    );
-  }
-
-  const renderTokenDetail = () => {
-    if (!selectedToken) return null;
-    return (
-      <View style={styles.detailContainer}>
-        <View style={styles.detailHeader}>
-            <Text style={styles.detailTitle}>{selectedToken.name} Price</Text>
-            <Pressable onPress={() => handleTokenPress(selectedToken)}>
-                <Ionicons name="close-circle" size={24} color="#6B768A"/>
-            </Pressable>
-        </View>
-        <PriceChart tokenId={selectedToken.id} />
-        <View style={styles.actionButtons}>
-          <Pressable style={[styles.button, styles.buyButton]}><Text style={styles.buttonText}>Buy</Text></Pressable>
-          <Pressable style={[styles.button, styles.sellButton]}><Text style={styles.buttonText}>Sell</Text></Pressable>
-          <Pressable style={[styles.button, styles.swapButton]} onPress={() => router.push('/(tabs)/trade')}><Text style={styles.buttonText}>Swap</Text></Pressable>
-        </View>
-      </View>
-    );
-  };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Market</Text>
-      </View>
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>{t('alerts')} & Market</Text>
+        </View>
 
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color="#6B768A" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search for a token..."
-          placeholderTextColor="#6B768A"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
-      
-      <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
-        <Segmented
-          options={FILTERS}
-          selected={activeFilter}
-          onSelect={(option) => setActiveFilter(option as MarketFilter)}
-        />
-      </View>
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color="#6B7280" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search for a token"
+            placeholderTextColor="#6B7280"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
 
-      {renderTokenDetail()}
+        <Segmented options={FILTERS} selected={activeFilter} onSelect={(option) => setActiveFilter(option as MarketFilter)} />
 
-      <FlatList
-        data={filteredAndSortedTokens}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <TokenRow token={item} currency={currency} onPress={() => handleTokenPress(item)}/>}
-        contentContainerStyle={styles.listContent}
-        ListEmptyComponent={<Empty message="No tokens found." actionTitle="Clear Search" onAction={() => setSearchQuery('')} />}
-      />
+        {selectedToken && (
+          <View style={styles.chartCard}>
+            <View style={styles.chartHeader}>
+              <Text style={styles.chartTitle}>{selectedToken.name}</Text>
+              <Text style={styles.chartPrice}>{formatCurrency(selectedToken.current_price, currency)}</Text>
+            </View>
+            <PriceChart tokenId={selectedToken.id} />
+          </View>
+        )}
+
+        <Text style={styles.sectionTitle}>{t('alerts')}</Text>
+        <View style={styles.alertForm}>
+          <Text style={styles.helper}>Select an asset below then set target price or % change</Text>
+          <View style={styles.row}>
+            <TextInput
+              style={styles.input}
+              keyboardType="numeric"
+              placeholder="Target price"
+              placeholderTextColor="#6B7280"
+              value={priceTarget}
+              onChangeText={setPriceTarget}
+            />
+            <TextInput
+              style={styles.input}
+              keyboardType="numeric"
+              placeholder="% change"
+              placeholderTextColor="#6B7280"
+              value={percentChange}
+              onChangeText={setPercentChange}
+            />
+          </View>
+          <View style={styles.row}>
+            <Pressable
+              style={[styles.directionChip, direction === 'above' && styles.directionChipActive]}
+              onPress={() => setDirection('above')}
+            >
+              <Text style={[styles.directionLabel, direction === 'above' && styles.directionLabelActive]}>Above</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.directionChip, direction === 'below' && styles.directionChipActive]}
+              onPress={() => setDirection('below')}
+            >
+              <Text style={[styles.directionLabel, direction === 'below' && styles.directionLabelActive]}>Below</Text>
+            </Pressable>
+            <Pressable style={[styles.directionChip, repeating && styles.directionChipActive]} onPress={() => setRepeating((prev) => !prev)}>
+              <Text style={[styles.directionLabel, repeating && styles.directionLabelActive]}>Repeat</Text>
+            </Pressable>
+          </View>
+          <Pressable style={styles.primaryButton} onPress={handleAddPriceAlert}>
+            <Text style={styles.primaryLabel}>Save Alert</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.alertList}>
+          {priceAlerts.map((alert) => (
+            <View key={alert.id} style={styles.alertItem}>
+              <View>
+                <Text style={styles.alertTitle}>{alert.assetSymbol}</Text>
+                <Text style={styles.alertMeta}>
+                  {alert.condition.targetPrice ? `Target ${alert.condition.direction} ${alert.condition.targetPrice}` : ''}
+                  {alert.condition.percentChange ? ` • ${alert.condition.percentChange}% change` : ''}
+                </Text>
+              </View>
+              <Pressable onPress={() => removePriceAlert(alert.id)}>
+                <Ionicons name="trash" size={18} color="#EF4444" />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+
+        <Text style={styles.sectionTitle}>Portfolio Alerts</Text>
+        <View style={styles.alertForm}>
+          <View style={styles.row}>
+            <TextInput
+              style={styles.input}
+              keyboardType="numeric"
+              placeholder="% threshold"
+              placeholderTextColor="#6B7280"
+              value={portfolioThreshold}
+              onChangeText={setPortfolioThreshold}
+            />
+            <Pressable
+              style={[styles.directionChip, portfolioDirection === 'up' && styles.directionChipActive]}
+              onPress={() => setPortfolioDirection('up')}
+            >
+              <Text style={[styles.directionLabel, portfolioDirection === 'up' && styles.directionLabelActive]}>Up</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.directionChip, portfolioDirection === 'down' && styles.directionChipActive]}
+              onPress={() => setPortfolioDirection('down')}
+            >
+              <Text style={[styles.directionLabel, portfolioDirection === 'down' && styles.directionLabelActive]}>Down</Text>
+            </Pressable>
+          </View>
+          <Pressable style={styles.primaryButton} onPress={handlePortfolioAlert}>
+            <Text style={styles.primaryLabel}>Set Portfolio Alert</Text>
+          </Pressable>
+          {portfolioAlerts.map((alert) => (
+            <Text key={alert.id} style={styles.alertMeta}>
+              Trigger when {alert.direction === 'up' ? 'gain' : 'loss'} exceeds {alert.thresholdPercent}%
+            </Text>
+          ))}
+        </View>
+
+        <Text style={styles.sectionTitle}>Market Movers</Text>
+        {tokensLoading && !tokens.length ? (
+          <View style={{ gap: 12 }}>
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Skeleton key={index} height={74} />
+            ))}
+          </View>
+        ) : (
+          <FlatList
+            scrollEnabled={false}
+            data={filteredTokens}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => <TokenRow token={item} currency={currency} onPress={() => handleTokenPress(item)} />}
+            ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+          />
+        )}
+
+        <Text style={styles.sectionTitle}>News Alerts</Text>
+        {news.map((article) => (
+          <Pressable key={article.id} style={styles.newsCard} onPress={() => WebBrowser.openBrowserAsync(article.url)}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={styles.newsTitle}>{article.title}</Text>
+              <MaterialCommunityIcons name="open-in-new" size={16} color="#60A5FA" />
+            </View>
+            <Text style={styles.newsSummary}>{article.summary}</Text>
+            <Text style={styles.newsSource}>{article.source}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
     </SafeAreaView>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0B1220',
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   header: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    marginBottom: 12,
   },
   headerTitle: {
     color: '#FFFFFF',
     fontSize: 24,
-    fontFamily: 'Inter-Bold',
+    fontWeight: '700',
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#111927',
-    borderRadius: 12,
+    borderRadius: 16,
     paddingHorizontal: 12,
-    marginHorizontal: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   searchInput: {
     flex: 1,
-    color: '#FFFFFF',
-    paddingVertical: 12,
+    paddingVertical: 10,
     marginLeft: 8,
-    fontFamily: 'Inter-Regular',
-    fontSize: 16,
+    color: '#FFFFFF',
   },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 20,
-  },
-  detailContainer: {
+  chartCard: {
     backgroundColor: '#111927',
-    marginHorizontal: 16,
     borderRadius: 16,
     padding: 16,
-    marginBottom: 16,
+    marginVertical: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.06)',
   },
-  detailHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 8
-  },
-  detailTitle: {
-      color: '#FFF',
-      fontFamily: 'Inter-Bold',
-      fontSize: 18
-  },
-  actionButtons: {
+  chartHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 16,
-  },
-  button: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
     alignItems: 'center',
-    marginHorizontal: 4,
+    marginBottom: 12,
   },
-  buyButton: { backgroundColor: '#1DB954' },
-  sellButton: { backgroundColor: '#EF4444' },
-  swapButton: { backgroundColor: '#2F80ED' },
-  buttonText: {
+  chartTitle: {
     color: '#FFFFFF',
-    fontFamily: 'Inter-Bold',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  chartPrice: {
+    color: '#60A5FA',
+  },
+  sectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '600',
+    marginVertical: 12,
+  },
+  alertForm: {
+    backgroundColor: '#111927',
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+  },
+  helper: {
+    color: '#9CA3AF',
+    fontSize: 12,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  input: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#FFFFFF',
+  },
+  directionChip: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#1F2937',
+    alignItems: 'center',
+  },
+  directionChipActive: {
+    backgroundColor: '#2563EB',
+  },
+  directionLabel: {
+    color: '#9CA3AF',
+    fontWeight: '600',
+  },
+  directionLabelActive: {
+    color: '#FFFFFF',
+  },
+  primaryButton: {
+    backgroundColor: '#2563EB',
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  primaryLabel: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  alertList: {
+    marginTop: 12,
+    gap: 12,
+  },
+  alertItem: {
+    backgroundColor: '#111927',
+    borderRadius: 16,
+    padding: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  alertTitle: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  alertMeta: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  newsCard: {
+    backgroundColor: '#111927',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    gap: 8,
+  },
+  newsTitle: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  newsSummary: {
+    color: '#9CA3AF',
+    fontSize: 13,
+  },
+  newsSource: {
+    color: '#6B7280',
+    fontSize: 12,
   },
 });
+
+export default MarketScreen;
+

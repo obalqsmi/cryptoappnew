@@ -1,252 +1,401 @@
-/**
- * History Screen: Displays a list of the user's past activities.
- * It shows transactions like swaps, transfers, and staking activities,
- * allowing the user to filter them by category and view their status.
- */
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import dayjs from 'dayjs';
 import localizedFormat from 'dayjs/plugin/localizedFormat';
-import { useRouter } from 'expo-router';
+import { cacheDirectory, writeAsStringAsync } from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import React, { useMemo, useState } from 'react';
-import { Appearance, SectionList, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  SectionList,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Empty from '../../components/Empty';
+
 import Segmented from '../../components/Segmented';
-import { formatCompact } from '../../services/formatting';
-import { useAppStore } from '../../state/appStore';
-import { usePortfolioStore } from '../../state/portfolioStore';
+import Skeleton from '../../components/Skeleton';
+import { formatCompact, formatCurrency } from '../../services/formatting';
+import { useAppStore } from '../../state/store';
+import { useActiveWallet, useSwapAnalytics } from '../../state/portfolioStore';
 import { Activity } from '../../types/market';
 
 dayjs.extend(localizedFormat);
 
-const FILTERS = ['All', 'Transfers', 'Swaps', 'Earn'] as const;
-type FilterOption = (typeof FILTERS)[number];
+const TYPE_FILTERS = ['All', 'Swaps', 'Transfers', 'Earn'] as const;
+const DATE_FILTERS = ['30D', '90D', 'All'] as const;
 
-const FILTER_ACTIVITY_MAP: Record<FilterOption, Activity['type'][]> = {
+const FILTER_MAP: Record<(typeof TYPE_FILTERS)[number], Activity['type'][]> = {
   All: ['swap', 'send', 'receive', 'stake'],
-  Transfers: ['send', 'receive'],
   Swaps: ['swap'],
+  Transfers: ['send', 'receive'],
   Earn: ['stake'],
-};
-
-const formatAddress = (address?: string) => {
-  if (!address) {
-    return 'Unknown';
-  }
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 };
 
 const ActivityIcon = ({ type }: { type: Activity['type'] }) => {
   switch (type) {
     case 'swap':
-      return <MaterialCommunityIcons name="swap-horizontal-bold" size={24} color="#2F80ED" />;
+      return <MaterialCommunityIcons name="swap-horizontal-bold" size={22} color="#60A5FA" />;
     case 'send':
-      return <Ionicons name="arrow-up-circle" size={24} color="#EF4444" />;
+      return <Ionicons name="arrow-up-circle" size={22} color="#F87171" />;
     case 'receive':
-      return <Ionicons name="arrow-down-circle" size={24} color="#1DB954" />;
+      return <Ionicons name="arrow-down-circle" size={22} color="#34D399" />;
     case 'stake':
-      return <MaterialCommunityIcons name="lock" size={24} color="#9333ea" />;
+      return <MaterialCommunityIcons name="lock" size={22} color="#A855F7" />;
     default:
-      return <Ionicons name="help-circle" size={24} color="#6B768A" />;
+      return <Ionicons name="help-circle" size={22} color="#9CA3AF" />;
   }
 };
 
-const ActivityItem = ({ item, isDarkMode }: { item: Activity; isDarkMode: boolean }) => {
-  const styles = getStyles(isDarkMode);
-  let title = 'Transaction';
-  let details = '';
-  let amountDisplay = <Text style={styles.amountZero}>-</Text>;
+const formatAddress = (address?: string) => (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Unknown');
 
-  switch (item.type) {
-    case 'swap':
-      title = 'Swap';
-      details = `${item.from.symbol} → ${item.to.symbol}`;
-      amountDisplay = (
-        <Text style={styles.amountPrimary}>
-          {formatCompact(item.to.amount)} {item.to.symbol}
-        </Text>
-      );
-      break;
-    case 'send': {
-      const symbol = item.from.symbol.toUpperCase();
-      title = `Send ${symbol}`;
-      details = `To: ${formatAddress(item.to.address)}`;
-      amountDisplay = (
-        <Text style={styles.amountNegative}>
-          - {formatCompact(item.from.amount)} {symbol}
-        </Text>
-      );
-      break;
-    }
-    case 'receive': {
-      const symbol = item.to.symbol.toUpperCase();
-      title = `Receive ${symbol}`;
-      details = `From: ${formatAddress(item.from.address)}`;
-      amountDisplay = (
-        <Text style={styles.amountPositive}>
-          + {formatCompact(item.to.amount)} {symbol}
-        </Text>
-      );
-      break;
-    }
-    case 'stake': {
-      const symbol = item.from.symbol.toUpperCase();
-      title = `Stake ${symbol}`;
-      details = `Validator: ${formatAddress(item.to.validator)}`;
-      amountDisplay = (
-        <Text style={styles.amountMuted}>
-          {formatCompact(item.from.amount)} {symbol}
-        </Text>
-      );
-      break;
-    }
-  }
+const HistoryScreen = () => {
+  const { currency } = useAppStore((state) => ({ currency: state.currency }));
+  const activeWallet = useActiveWallet();
+  const swapAnalytics = useSwapAnalytics();
+  const activities = activeWallet.activities;
+  const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>('All');
+  const [dateFilter, setDateFilter] = useState<(typeof DATE_FILTERS)[number]>('30D');
+  const [assetFilter, setAssetFilter] = useState<string>('All');
 
-  return (
-    <View style={styles.row}>
-      <ActivityIcon type={item.type} />
-      <View style={styles.rowCenter}>
-        <Text style={styles.rowTitle}>{title}</Text>
-        <Text style={styles.rowSubtitle}>{details}</Text>
-      </View>
-      <View style={styles.rowRight}>
-        {amountDisplay}
-        <Text style={styles.rowSubtitle}>{dayjs(item.date).format('MMM D, h:mm A')}</Text>
-      </View>
-    </View>
-  );
-};
-
-export default function HistoryScreen() {
-  const router = useRouter();
-  const { activities } = usePortfolioStore();
-  const { theme } = useAppStore();
-  const [activeFilter, setActiveFilter] = useState<FilterOption>(FILTERS[0]);
-  
-  const colorScheme = theme === 'system' ? Appearance.getColorScheme() : theme;
-  const isDarkMode = colorScheme === 'dark';
-  const styles = getStyles(isDarkMode);
+  const assets = useMemo(() => {
+    const symbols = new Set<string>();
+    activities.forEach((activity) => {
+      if ('symbol' in activity.from) {
+        symbols.add(activity.from.symbol.toUpperCase());
+      }
+      if ('symbol' in activity.to) {
+        symbols.add(activity.to.symbol.toUpperCase());
+      }
+    });
+    return ['All', ...Array.from(symbols)];
+  }, [activities]);
 
   const filteredActivities = useMemo(() => {
-    if (activeFilter === 'All') {
-      return activities;
-    }
-    const filterTypes = FILTER_ACTIVITY_MAP[activeFilter];
-    return activities.filter((a) => filterTypes.includes(a.type));
-  }, [activities, activeFilter]);
+    const types = FILTER_MAP[typeFilter];
+    const now = dayjs();
+    const cutoff = dateFilter === '30D' ? now.subtract(30, 'day') : dateFilter === '90D' ? now.subtract(90, 'day') : null;
+    return activities.filter((activity) => {
+      const matchesType = types.includes(activity.type);
+      const matchesDate = cutoff ? dayjs(activity.date).isAfter(cutoff) : true;
+      const matchesAsset = (() => {
+        if (assetFilter === 'All') return true;
+        const fromSymbol = 'symbol' in activity.from ? activity.from.symbol.toUpperCase() : null;
+        const toSymbol = 'symbol' in activity.to ? activity.to.symbol.toUpperCase() : null;
+        return fromSymbol === assetFilter || toSymbol === assetFilter;
+      })();
+      return matchesType && matchesDate && matchesAsset;
+    });
+  }, [activities, typeFilter, dateFilter, assetFilter]);
 
-  const sections = useMemo(() => {
-    const grouped = filteredActivities.reduce((acc, activity) => {
+  const groupedSections = useMemo(() => {
+    const grouped = filteredActivities.reduce<Record<string, Activity[]>>((acc, activity) => {
       const date = dayjs(activity.date).format('MMMM D, YYYY');
       if (!acc[date]) {
         acc[date] = [];
       }
       acc[date].push(activity);
       return acc;
-    }, {} as Record<string, Activity[]>);
-
-    return Object.keys(grouped).map((date) => ({
-      title: date,
-      data: grouped[date],
-    }));
+    }, {});
+    return Object.entries(grouped).map(([title, data]) => ({ title, data }));
   }, [filteredActivities]);
 
+  const exportData = async (extension: 'csv' | 'xlsx') => {
+    if (!filteredActivities.length) {
+      Alert.alert('Nothing to export');
+      return;
+    }
+    const baseDirectory = cacheDirectory ?? '';
+    if (!baseDirectory) {
+      Alert.alert('Export unavailable', 'Storage directory is not accessible.');
+      return;
+    }
+
+    const headers = 'date,type,fromSymbol,fromAmount,toSymbol,toAmount\n';
+    const rows = filteredActivities
+      .map((activity) => {
+        let fromSymbol = '';
+        let fromAmount = '';
+        let toSymbol = '';
+        let toAmount = '';
+
+        switch (activity.type) {
+          case 'swap':
+            fromSymbol = activity.from.symbol;
+            fromAmount = String(activity.from.amount);
+            toSymbol = activity.to.symbol;
+            toAmount = String(activity.to.amount);
+            break;
+          case 'send':
+            fromSymbol = activity.from.symbol;
+            fromAmount = String(activity.from.amount);
+            break;
+          case 'receive':
+            toSymbol = activity.to.symbol;
+            toAmount = String(activity.to.amount);
+            break;
+          case 'stake':
+            fromSymbol = activity.from.symbol;
+            fromAmount = String(activity.from.amount);
+            toSymbol = activity.to.validator;
+            break;
+          default:
+            break;
+        }
+
+        return `${dayjs(activity.date).toISOString()},${activity.type},${fromSymbol},${fromAmount},${toSymbol},${toAmount}`;
+      })
+      .join('\n');
+    const content = headers + rows;
+    const filename = `${baseDirectory}history.${extension}`;
+    await writeAsStringAsync(filename, content);
+    await Sharing.shareAsync(filename, { mimeType: 'text/csv', dialogTitle: 'Export History' });
+  };
+
+  const renderActivity = ({ item }: { item: Activity }) => {
+    const isSwap = item.type === 'swap';
+    const isSend = item.type === 'send';
+    const isReceive = item.type === 'receive';
+    const isStake = item.type === 'stake';
+
+    let subtitle: string;
+    if (isSwap) {
+      subtitle = `${item.from.symbol} → ${item.to.symbol}`;
+    } else if (isSend) {
+      subtitle = `To ${formatAddress(item.to.address)}`;
+    } else if (isReceive) {
+      subtitle = `From ${formatAddress(item.from.address)}`;
+    } else {
+      subtitle = `Validator ${formatAddress(item.to.validator)}`;
+    }
+
+    return (
+      <View style={styles.row}>
+        <ActivityIcon type={item.type} />
+        <View style={styles.rowCenter}>
+          <Text style={styles.rowTitle}>{item.type.toUpperCase()}</Text>
+          <Text style={styles.rowSubtitle}>{subtitle}</Text>
+        </View>
+        <View style={styles.rowRight}>
+          {isSwap && (
+            <Text style={styles.rowAmount}>
+              {formatCompact(item.to.amount)} {item.to.symbol}
+            </Text>
+          )}
+          {isSend && (
+            <Text style={styles.amountNegative}>
+              - {formatCompact(item.from.amount)} {item.from.symbol}
+            </Text>
+          )}
+          {isReceive && (
+            <Text style={styles.amountPositive}>
+              + {formatCompact(item.to.amount)} {item.to.symbol}
+            </Text>
+          )}
+          {isStake && (
+            <Text style={styles.amountMuted}>
+              {formatCompact(item.from.amount)} {item.from.symbol}
+            </Text>
+          )}
+          <Text style={styles.rowSubtitle}>{dayjs(item.date).format('MMM D, h:mm A')}</Text>
+        </View>
+      </View>
+    );
+  };
+
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>History</Text>
-      </View>
-      <View style={{ paddingHorizontal: 16, marginBottom: 16, marginTop: 8 }}>
-        <Segmented
-          options={FILTERS}
-          selected={activeFilter}
-          onSelect={(option) => setActiveFilter(option as FilterOption)}
-        />
+        <View style={styles.exportRow}>
+          <Pressable style={styles.exportButton} onPress={() => exportData('csv')}>
+            <Text style={styles.exportLabel}>Export CSV</Text>
+          </Pressable>
+          <Pressable style={styles.exportButton} onPress={() => exportData('xlsx')}>
+            <Text style={styles.exportLabel}>Export Excel</Text>
+          </Pressable>
+        </View>
       </View>
 
-      <SectionList
-        sections={sections}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <ActivityItem item={item} isDarkMode={isDarkMode} />}
-        renderSectionHeader={({ section: { title } }) => (
-          <Text style={styles.sectionHeader}>{title}</Text>
-        )}
-        ListEmptyComponent={
-          <Empty
-            message="No activities yet."
-            actionTitle="Make a Swap"
-            onAction={() => router.push('/(tabs)/trade')}
-          />
-        }
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
-      />
+      <View style={styles.analyticsCard}>
+        <View style={styles.analyticsColumn}>
+          <Text style={styles.analyticsLabel}>Total Swaps</Text>
+          <Text style={styles.analyticsValue}>{swapAnalytics.swapCount}</Text>
+        </View>
+        <View style={styles.analyticsColumn}>
+          <Text style={styles.analyticsLabel}>Volume</Text>
+          <Text style={styles.analyticsValue}>{formatCurrency(swapAnalytics.totalVolume, currency)}</Text>
+        </View>
+        <View style={styles.analyticsColumn}>
+          <Text style={styles.analyticsLabel}>Avg Entry</Text>
+          <Text style={styles.analyticsValue}>{formatCurrency(swapAnalytics.averageEntry, currency)}</Text>
+        </View>
+      </View>
+
+      <View style={styles.filters}>
+        <Segmented options={TYPE_FILTERS} selected={typeFilter} onSelect={(option) => setTypeFilter(option as (typeof TYPE_FILTERS)[number])} />
+        <Segmented options={DATE_FILTERS} selected={dateFilter} onSelect={(option) => setDateFilter(option as (typeof DATE_FILTERS)[number])} />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.assetRow}>
+          {assets.map((asset) => (
+            <Pressable
+              key={asset}
+              style={[styles.assetChip, assetFilter === asset && styles.assetChipActive]}
+              onPress={() => setAssetFilter(asset)}
+            >
+              <Text style={[styles.assetLabel, assetFilter === asset && styles.assetLabelActive]}>{asset}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+
+      {activities.length === 0 ? (
+        <View style={{ marginTop: 80 }}>
+          <Skeleton height={80} />
+        </View>
+      ) : (
+        <SectionList
+          sections={groupedSections}
+          keyExtractor={(item) => item.id}
+          renderItem={renderActivity}
+          renderSectionHeader={({ section: { title } }) => <Text style={styles.sectionHeader}>{title}</Text>}
+          ListEmptyComponent={
+            <View style={{ padding: 32 }}>
+              <Text style={styles.emptyText}>No matching history for selected filters.</Text>
+            </View>
+          }
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
+        />
+      )}
     </SafeAreaView>
   );
-}
+};
 
-const getStyles = (isDarkMode: boolean) => StyleSheet.create({
+const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: isDarkMode ? '#0B1220' : '#F6F8FC',
+    backgroundColor: '#0B1220',
   },
   header: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 16,
+    paddingBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   headerTitle: {
-    color: isDarkMode ? '#FFFFFF' : '#0B1220',
+    color: '#FFFFFF',
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: '700',
+  },
+  exportRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  exportButton: {
+    backgroundColor: '#1F2937',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  exportLabel: {
+    color: '#60A5FA',
+    fontWeight: '600',
+  },
+  analyticsCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: '#111927',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  analyticsColumn: {
+    alignItems: 'flex-start',
+  },
+  analyticsLabel: {
+    color: '#9CA3AF',
+    fontSize: 12,
+  },
+  analyticsValue: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  filters: {
+    gap: 12,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  assetRow: {
+    gap: 8,
+  },
+  assetChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: '#1F2937',
+  },
+  assetChipActive: {
+    backgroundColor: '#2563EB',
+  },
+  assetLabel: {
+    color: '#9CA3AF',
+  },
+  assetLabelActive: {
+    color: '#FFFFFF',
   },
   sectionHeader: {
-    paddingVertical: 8,
-    color: isDarkMode ? '#6B768A' : '#687385',
-    fontWeight: '600',
-    backgroundColor: isDarkMode ? '#0B1220' : '#F6F8FC',
+    color: '#9CA3AF',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: 12,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+    gap: 12,
   },
   rowCenter: {
     flex: 1,
-    marginLeft: 12,
   },
   rowTitle: {
-    color: isDarkMode ? '#E6ECF5' : '#0B1220',
+    color: '#FFFFFF',
     fontWeight: '600',
-    fontSize: 16,
   },
   rowSubtitle: {
-    color: isDarkMode ? '#6B768A' : '#687385',
-    fontSize: 13,
-    marginTop: 2,
+    color: '#9CA3AF',
+    fontSize: 12,
   },
   rowRight: {
     alignItems: 'flex-end',
+    gap: 4,
   },
-  amountPrimary: {
-    color: '#2F80ED',
-    fontWeight: '600',
-  },
-  amountPositive: {
-    color: '#1DB954',
+  rowAmount: {
+    color: '#60A5FA',
     fontWeight: '600',
   },
   amountNegative: {
-    color: '#EF4444',
+    color: '#F87171',
     fontWeight: '600',
   },
-  amountZero: {
-    color: isDarkMode ? '#6B768A' : '#687385',
+  amountPositive: {
+    color: '#34D399',
     fontWeight: '600',
   },
   amountMuted: {
-    color: isDarkMode ? '#a1a1aa' : '#71717a',
-    fontWeight: '600',
+    color: '#9CA3AF',
+  },
+  emptyText: {
+    color: '#6B7280',
+    textAlign: 'center',
   },
 });
+
+export default HistoryScreen;
 
